@@ -500,6 +500,10 @@ int main(int argc, char** argv) {
     return 0;
   }
   std::string pythonScipt = argv[1];
+  if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
+    std::cerr << "Failed to initialize GLAD" << std::endl;
+    return -1;
+  }
   auto map = std::make_unique<Map>(2, 30, 50);
   std::unique_ptr<OglDisplayer> displayer = std::make_unique<OglDisplayer>(*map);
   std::unique_ptr<PythonSerialAdapter> input = std::make_unique<PythonSerialAdapter>(pythonScipt);
