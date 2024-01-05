@@ -1,4 +1,5 @@
 #include <array>
+#include <condition_variable>
 #include <cstring>
 #include <format>
 #include <glad/glad.h>
@@ -10,7 +11,7 @@
 #include <vector>
 #include <random>
 #include <sys/stat.h>
-#include <tbb/tbb.h>
+#include <queue>
 #define ERROR(msg) do {std::cout << std::format("Error: {}", msg) << std::endl; exit(1);} while(0)
 
 using namespace opengl;
@@ -280,10 +281,44 @@ struct GameState {
   float time{}, lastOperationTime{}, startTime{};
 };
 
+template <typename T> class ThreadSafeQueue {
+  public:
+  ThreadSafeQueue() = default;
+  bool empty() {
+    std::lock_guard<std::mutex> lk(mtx);
+    return q.empty();
+  }
+  void push(T v) {
+    std::lock_guard<std::mutex> lk(mtx);
+    q.push(v);
+  }
+  void ImmPush(T v) { q.push(v); }
+  bool TryPop(T &v) {
+    std::lock_guard<std::mutex> lk(mtx);
+    if (q.empty())
+      return false;
+    v = q.front();
+    q.pop();
+    return true;
+  }
+  void WaitPop(T &v) {
+    std::unique_lock<std::mutex> lk(mtx);
+    cond.wait(lk, [this]() -> bool { return !q.empty(); });
+    v = q.front();
+    q.pop();
+    lk.unlock();
+  }
+
+  private:
+  std::mutex mtx;
+  std::condition_variable cond;
+  std::queue<T> q;
+};
+
 struct InputAdapter {
   virtual void inputAction() = 0;
   virtual ~InputAdapter() = default;
-  tbb::concurrent_queue<Action> buffer;
+  ThreadSafeQueue<Action> buffer;
 };
 
 bool initGLFW(GLFWwindow*&window) {
@@ -508,7 +543,7 @@ int main(int argc, char** argv) {
   displayer->updateBlockData(state);
   while (!displayer->shouldClose(state)) {
     glfwPollEvents();
-    if (Action action; input->buffer.try_pop(action))
+    if (Action action; input->buffer.TryPop(action))
       state.move(*map, action);
     state.update(*map);
     displayer->updateBlockData(state);

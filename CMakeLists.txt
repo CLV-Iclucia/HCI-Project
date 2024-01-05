@@ -5,7 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(HCI_EXTERNAL "${PROJECT_SOURCE_DIR}/external")
 set(GLM_PATH ${HCI_EXTERNAL}/glm)
 
-find_package(TBB REQUIRED)
 find_package(OpenGL REQUIRED)
 add_subdirectory(${HCI_EXTERNAL}/glfw)
 add_subdirectory(${HCI_EXTERNAL}/glad)
