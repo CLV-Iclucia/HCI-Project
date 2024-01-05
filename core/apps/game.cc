@@ -69,19 +69,19 @@ class Map : NonCopyable {
   public:
     [[nodiscard]] TileState tile(int x, int y) const {
       assert(x >= 0 && x < width && y >= 0 && y < height);
-      return tiles[y * width + x];
+      return tiles[x * height + y];
     }
     TileState& tile(int x, int y) {
       assert(x >= 0 && x < width && y >= 0 && y < height);
-      return tiles[y * width + x];
+      return tiles[x * height + y];
     }
     [[nodiscard]] TileState tile(Point p) const {
       assert(p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
-      return tiles[p.y * width + p.x];
+      return tiles[p.x * height + p.y];
     }
     TileState& tile(Point p) {
       assert(p.x >= 0 && p.x < width && p.y >= 0 && p.y < height);
-      return tiles[p.y * width + p.x];
+      return tiles[p.x * height + p.y];
     }
     Map(int numPaths, int minPathLen, int maxPathLen) {
       std::vector<Action> actions;
@@ -120,6 +120,8 @@ class Map : NonCopyable {
         }
         curPathStart += len;
         exits.push_back(pos);
+        assert(tile(pos.x, pos.y) != TileState::Empty);
+        std::cout << pos.x << " " << pos.y << std::endl;
       }
     }
 
@@ -335,12 +337,12 @@ struct DrawBoard {
   std::vector<glm::vec3> positions;
   std::vector<glm::vec3> colors;
   std::vector<uint> idx;
-  void addSquare(float x, float y, float width, float height, const glm::vec3&color) {
+  void addSquare(float x, float y, float z, float width, float height, const glm::vec3&color) {
     int num_vertices = positions.size();
-    positions.emplace_back(x, y, 0.0);
-    positions.emplace_back(x + width, y, 0.0);
-    positions.emplace_back(x + width, y + height, 0.0);
-    positions.emplace_back(x, y + height, 0.0);
+    positions.emplace_back(x, y, z);
+    positions.emplace_back(x + width, y, z);
+    positions.emplace_back(x + width, y + height, z);
+    positions.emplace_back(x, y + height, z);
     for (int i = 0; i < 4; ++i)
       colors.push_back(color);
     idx.push_back(num_vertices);
@@ -397,12 +399,12 @@ class PythonSerialAdapter final : public InputAdapter {
     int filterInput() const {
       static int prev = 998;
       int v = 998;
-      if (fscanf(pipe.get(), "%d", &v) == -1)
+      if (fscanf(pipe.get(), "%d", &v) == EOF)
         return -1;
       printf("%d\n", v);
       while (v == prev || v == 998) {
         prev = v;
-        if (fscanf(pipe.get(), "%d", &v))
+        if (fscanf(pipe.get(), "%d", &v) == EOF)
           return -1;
         printf("%d\n", v);
       }
@@ -429,22 +431,25 @@ class OglDisplayer {
           glm::vec3 squarePosition;
           squarePosition.x = -1.0f + static_cast<float>(i) / width; // Set x position based on column index
           squarePosition.y = -1.0f + static_cast<float>(j) / height; // Set y position based on row index
-          squarePosition.z = 0.0f; // Set z position as 0
+          squarePosition.z = 0.0f;
           if (map.tile(i, j) == TileState::Empty) continue;
-          if (map.isExit(i, j))
+          if (map.isExit(i, j)) {
             squareColor = glm::vec3(0.0f, 1.0f, 0.0f);
+            squarePosition.z = -0.5f;
+          }
           else if (map.tile(i, j) == TileState::Black)
             squareColor = glm::vec3(0.0f, 0.0f, 0.0f);
           else if (map.tile(i, j) == TileState::Gray)
             squareColor = glm::vec3(0.5f, 0.5f, 0.5f);
           else if (map.tile(i, j) == TileState::White)
             squareColor = glm::vec3(1.0f, 1.0f, 1.0f);
-          board.addSquare(squarePosition.x, squarePosition.y, 2.0f / width, 2.0f / height, squareColor);
+          std::cout << i << " " << j << " " << squareColor.x << " " << squareColor.y << " " << squareColor.z << std::endl;
+          board.addSquare(squarePosition.x, squarePosition.y, squarePosition.z, 2.0f / width, 2.0f / height, squareColor);
         }
       }
       bgCtx = std::make_unique<OpenGLContext>();
       blockCoordPos = board.positions.size();
-      board.addSquare(0, 0, 2.0f / width, 2.0f / height, glm::vec3(0.0f, 0.0f, 1.0f));
+      board.addSquare(0, 0, 2.0f / width, 2.0f / height, -0.5f, glm::vec3(0.0f, 0.0f, 1.0f));
       shader->initAttributeHandles();
       shader->initUniformHandles();
       bgCtx->vao.bind();
@@ -509,7 +514,7 @@ int main(int argc, char** argv) {
     return 0;
   }
   std::string pythonScipt = argv[1];
-  auto map = std::make_unique<Map>(2, 30, 50);
+  auto map = std::make_unique<Map>(1, 5, 8);
   std::unique_ptr<OglDisplayer> displayer = std::make_unique<OglDisplayer>(*map);
   std::unique_ptr<PythonSerialAdapter> input = std::make_unique<PythonSerialAdapter>(pythonScipt);
   GameState state(map->getStart());
