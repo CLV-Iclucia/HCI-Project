@@ -5,7 +5,6 @@
 #include <GLFW/glfw3.h>
 #include <ogl-render/ogl-ctx.h>
 #include <ogl-render/shader-prog.h>
-#include <ogl-render/camera.h>
 #include <iostream>
 #include <iostream>
 #include <vector>
@@ -251,7 +250,7 @@ struct GameState {
     }
     if (time > startTime + kMaxGameTime) {
       ending = GameEnd::Finished;
-      return ;
+      return;
     }
     if (time > lastOperationTime + kOperationInterval) {
       displayPos = glm::vec2(
@@ -321,7 +320,7 @@ bool initGLFW(GLFWwindow*&window) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-  window = glfwCreateWindow(640, 720, "FLUID-GL", nullptr, nullptr);
+  window = glfwCreateWindow(640, 720, "HCI-GAME", nullptr, nullptr);
   if (!window) {
     std::cerr << "Failed to create GLFW window" << std::endl;
     glfwTerminate();
@@ -410,11 +409,14 @@ class PythonSerialAdapter final : public InputAdapter {
 
 class OglDisplayer {
   public:
-    explicit OglDisplayer(const Map&map) : width(map.getWidth()), height(map.getHeight()),
-                                           shader(std::make_unique<ShaderProg>(
-                                             std::format("{}/2d-default.vs", SHADER_DIR).c_str(),
-                                             std::format("{}/2d-default.fs", SHADER_DIR).c_str())) {
+    explicit OglDisplayer(const Map&map) : width(map.getWidth()), height(map.getHeight()) {
       initGLFW(window);
+      if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        std::cerr << "Failed to initialize GLAD" << std::endl;
+        exit(1);
+      }
+      shader = std::make_unique<ShaderProg>(std::format("{}/2d-default.vs", SHADER_DIR).c_str(),
+                                            std::format("{}/2d-default.fs", SHADER_DIR).c_str());
       for (int i = 0; i < width; ++i) {
         for (int j = 0; j < height; ++j) {
           glm::vec3 squareColor;
@@ -434,31 +436,32 @@ class OglDisplayer {
           board.addSquare(squarePosition.x, squarePosition.y, 2.0f / width, 2.0f / height, squareColor);
         }
       }
+      bgCtx = std::make_unique<OpenGLContext>();
       blockCoordPos = board.positions.size();
       board.addSquare(0, 0, 2.0f / width, 2.0f / height, glm::vec3(0.0f, 0.0f, 1.0f));
       shader->initAttributeHandles();
       shader->initUniformHandles();
-      bgCtx.vao.bind();
-      bgCtx.newAttribute("aPos", board.positions, 3, 3 * sizeof(float), GL_FLOAT);
-      bgCtx.newAttribute("aColor", board.colors, 3, 3 * sizeof(float), GL_FLOAT);
-      bgCtx.ebo.bind();
-      bgCtx.ebo.passData(board.idx);
+      bgCtx->vao.bind();
+      bgCtx->newAttribute("aPos", board.positions, 3, 3 * sizeof(float), GL_FLOAT);
+      bgCtx->newAttribute("aColor", board.colors, 3, 3 * sizeof(float), GL_FLOAT);
+      bgCtx->ebo.bind();
+      bgCtx->ebo.passData(board.idx);
       shader->use();
     }
     bool shouldClose(const GameState&state) const {
       return glfwWindowShouldClose(window) || state.ending != GameEnd::Running;
     }
     void updateBlockPos(const GameState&state) {
-      auto& vbo = bgCtx.vbo[bgCtx.attribute("aPos")];
+      auto& vbo = bgCtx->vbo[bgCtx->attribute("aPos")];
       vbo.bind();
-      board.positions[blockCoordPos] = glm::vec3(state.displayPos[0], state.displayPos[1], 1.0f);
-      board.positions[blockCoordPos + 1] = glm::vec3(state.displayPos[0] + 2.0f / width, state.displayPos[1], 1.0f);
+      board.positions[blockCoordPos] = glm::vec3(state.displayPos[0], state.displayPos[1], -1.0f);
+      board.positions[blockCoordPos + 1] = glm::vec3(state.displayPos[0] + 2.0f / width, state.displayPos[1], -1.0f);
       board.positions[blockCoordPos + 2] = glm::vec3(state.displayPos[0] + 2.0f / width,
                                                      state.displayPos[1] + 2.0f / height,
-                                                     1.0f);
-      board.positions[blockCoordPos + 3] = glm::vec3(state.displayPos[0], state.displayPos[1] + 2.0f / height, 1.0f);
+                                                     -1.0f);
+      board.positions[blockCoordPos + 3] = glm::vec3(state.displayPos[0], state.displayPos[1] + 2.0f / height, -1.0f);
       vbo.updateData(board.positions.data(), blockCoordPos, 4);
-      auto& color_vbo = bgCtx.vbo[bgCtx.attribute("aColor")];
+      auto& color_vbo = bgCtx->vbo[bgCtx->attribute("aColor")];
       color_vbo.bind();
       glm::vec3 blockColor = glm::vec3(0.0f, 0.0f, 1.0f);
       if (state.color == TileState::Black)
@@ -491,7 +494,7 @@ class OglDisplayer {
     int width, height;
     int blockCoordPos{};
     std::unique_ptr<ShaderProg> shader{};
-    OpenGLContext bgCtx;
+    std::unique_ptr<OpenGLContext> bgCtx;
 };
 
 int main(int argc, char** argv) {
@@ -500,10 +503,6 @@ int main(int argc, char** argv) {
     return 0;
   }
   std::string pythonScipt = argv[1];
-  if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
-    std::cerr << "Failed to initialize GLAD" << std::endl;
-    return -1;
-  }
   auto map = std::make_unique<Map>(2, 30, 50);
   std::unique_ptr<OglDisplayer> displayer = std::make_unique<OglDisplayer>(*map);
   std::unique_ptr<PythonSerialAdapter> input = std::make_unique<PythonSerialAdapter>(pythonScipt);
