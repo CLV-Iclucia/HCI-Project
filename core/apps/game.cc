@@ -363,6 +363,8 @@ class PythonSerialAdapter final : public InputAdapter {
     }
     void inputAction() override {
       int v = filterInput();
+      if (v == -1)
+        ERROR("unexpected end of pipe");
       while (running) {
         switch (v) {
           case 0:
@@ -395,10 +397,14 @@ class PythonSerialAdapter final : public InputAdapter {
     int filterInput() const {
       static int prev = 998;
       int v = 998;
-      fscanf(pipe.get(), "%d", &v);
+      if (fscanf(pipe.get(), "%d", &v) == -1)
+        return -1;
+      printf("%d\n", v);
       while (v == prev || v == 998) {
         prev = v;
-        fscanf(pipe.get(), "%d", &v);
+        if (fscanf(pipe.get(), "%d", &v))
+          return -1;
+        printf("%d\n", v);
       }
       return v;
     }
@@ -454,12 +460,12 @@ class OglDisplayer {
     void updateBlockPos(const GameState&state) {
       auto& vbo = bgCtx->vbo[bgCtx->attribute("aPos")];
       vbo.bind();
-      board.positions[blockCoordPos] = glm::vec3(state.displayPos[0], state.displayPos[1], -1.0f);
-      board.positions[blockCoordPos + 1] = glm::vec3(state.displayPos[0] + 2.0f / width, state.displayPos[1], -1.0f);
+      board.positions[blockCoordPos] = glm::vec3(state.displayPos[0], state.displayPos[1], -0.5f);
+      board.positions[blockCoordPos + 1] = glm::vec3(state.displayPos[0] + 2.0f / width, state.displayPos[1], -0.5f);
       board.positions[blockCoordPos + 2] = glm::vec3(state.displayPos[0] + 2.0f / width,
                                                      state.displayPos[1] + 2.0f / height,
-                                                     -1.0f);
-      board.positions[blockCoordPos + 3] = glm::vec3(state.displayPos[0], state.displayPos[1] + 2.0f / height, -1.0f);
+                                                     -0.5f);
+      board.positions[blockCoordPos + 3] = glm::vec3(state.displayPos[0], state.displayPos[1] + 2.0f / height, -0.5f);
       vbo.updateData(board.positions.data(), blockCoordPos, 4);
       auto& color_vbo = bgCtx->vbo[bgCtx->attribute("aColor")];
       color_vbo.bind();
