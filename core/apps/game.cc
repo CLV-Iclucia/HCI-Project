@@ -10,84 +10,11 @@
 #include <iostream>
 #include <vector>
 #include <random>
+#include <sys/stat.h>
 #include <tbb/tbb.h>
 #define ERROR(msg) do {std::cout << std::format("Error: {}", msg) << std::endl; exit(1);} while(0)
 
 using namespace opengl;
-bool initGLFW(GLFWwindow*&window) {
-  if (!glfwInit()) {
-    std::cerr << "Failed to initialize GLFW" << std::endl;
-    return false;
-  }
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-  window = glfwCreateWindow(1280,
-                            720,
-                            "SURFACE-DEMO",
-                            nullptr,
-                            nullptr);
-  if (!window) {
-    std::cerr << "Failed to create GLFW window" << std::endl;
-    glfwTerminate();
-    return false;
-  }
-  glfwMakeContextCurrent(window);
-  glfwSwapInterval(1);
-  return true;
-}
-
-struct PhongMaterial {
-  glm::vec3 ambient;
-  glm::vec3 diffuse;
-  glm::vec3 specular;
-  float shininess = 32.0;
-  PhongMaterial(glm::vec3 ambient_ = glm::vec3(1.f, 0.5f, 0.31f),
-                glm::vec3 diffuse_ = glm::vec3(1.f, 0.5f, 0.31f),
-                glm::vec3 specular_ = glm::vec3(1.f, 1.f, 1.f))
-    : ambient(std::move(ambient_)), diffuse(std::move(diffuse_)),
-      specular(std::move(specular_)) {
-  }
-  void setUniformInstance(ShaderProg&shader, const std::string&instanceName) {
-    shader.setVec3f(instanceName + std::string(".ambient"), ambient);
-    shader.setVec3f(instanceName + std::string(".diffuse"), diffuse);
-    shader.setVec3f(instanceName + std::string(".specular"), specular);
-    shader.setFloat(instanceName + std::string(".shininess"), shininess);
-  }
-} phong;
-
-struct Light {
-  glm::vec3 position;
-  glm::vec3 ambient;
-  glm::vec3 diffuse;
-  glm::vec3 specular;
-  Light(glm::vec3 ambient_ = glm::vec3(0.1f, 0.1f, 0.1f),
-        glm::vec3 diffuse_ = glm::vec3(0.5f, 0.5f, 0.5f),
-        glm::vec3 specular_ = glm::vec3(1.0f, 1.0f, 1.0f))
-    : ambient(std::move(ambient_)), diffuse(std::move(diffuse_)),
-      specular(std::move(specular_)) {
-  }
-  void setUniformInstance(ShaderProg&shader, const std::string&instanceName) {
-    shader.setVec3f(instanceName + std::string(".position"), position);
-    shader.setVec3f(instanceName + std::string(".ambient"), ambient);
-    shader.setVec3f(instanceName + std::string(".diffuse"), diffuse);
-    shader.setVec3f(instanceName + std::string(".specular"), specular);
-  }
-};
-
-FpsCamera camera;
-void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
-  camera.processMouseScroll(yoffset);
-}
-
-void processWindowInput(GLFWwindow* window, FpsCamera&camera) {
-  static float lastFrame = 0.f;
-  float currentFrame = glfwGetTime();
-  float deltaTime = currentFrame - lastFrame;
-  lastFrame = currentFrame;
-  camera.processKeyBoard(window, deltaTime);
-}
-
 
 struct Range {
   int begin;
@@ -114,7 +41,8 @@ class RandomGenerator {
 
 struct Point {
   Point() = default;
-  Point(int x, int y) : x(x), y(y) {}
+  Point(int x, int y) : x(x), y(y) {
+  }
   int x{};
   int y{};
 };
@@ -134,7 +62,7 @@ void clearScreen() {
   std::system("cls");
 #else
   // Assume POSIX
-  std::system ("clear");
+  std::system("clear");
 #endif
 }
 
@@ -233,15 +161,23 @@ class Map : NonCopyable {
     [[nodiscard]] const std::vector<Point>& getExits() const {
       return exits;
     }
+
+    [[nodiscard]] bool isExit(int i, int j) const {
+      for (const auto&ex : exits)
+        if (ex.x == i && ex.y == j)
+          return true;
+      return false;
+    }
+
   private:
     std::vector<TileState> tiles;
     std::vector<Point> exits;
     Point start;
     int width, height;
     static Point computeMapInfo(const std::vector<Action>&actions,
-                         const std::vector<int>&actionLengths,
-                         int&width,
-                         int&height) {
+                                const std::vector<int>&actionLengths,
+                                int&width,
+                                int&height) {
       Point currentPos = {0, 0};
       int minX = 0, maxX = 0, minY = 0, maxY = 0;
       int curPathStart = 0;
@@ -269,6 +205,9 @@ class Map : NonCopyable {
     RandomGenerator randGen;
 };
 
+constexpr float kOperationInterval = 0.2f; // sec
+constexpr float kMaxGameTime = 60.0f; // sec
+
 enum class GameEnd {
   Finished,
   Failed,
@@ -276,7 +215,8 @@ enum class GameEnd {
 };
 
 struct GameState {
-  explicit GameState(Point p) : pos(p), time(0.f) {}
+  explicit GameState(Point p) : pos(p), time(glfwGetTime()) {
+  }
   void move(Action action) {
     if (action == Action::Up)
       pos.x--;
@@ -286,9 +226,10 @@ struct GameState {
       pos.y--;
     else if (action == Action::Right)
       pos.y++;
-    else ERROR("unknown action");
+    else
+      ERROR("unknown action");
   }
-  void update(const Map& map) {
+  void update(const Map&map) {
     if (pos.x < 0 || pos.x >= map.getWidth() || pos.y < 0 || pos.y >= map.getHeight())
       ending = GameEnd::Failed;
     if (color != TileState::Black && color != TileState::White)
@@ -302,14 +243,31 @@ struct GameState {
     for (auto end : map.getExits()) {
       if (pos.x == end.x && pos.y == end.y) {
         ending = GameEnd::Finished;
-        return ;
+        return;
       }
+    }
+    time = glfwGetTime();
+    if (time > lastOperationTime + kOperationInterval) {
+      displayPos = glm::vec2(
+        -1.0f + static_cast<float>(pos.x) / map.getWidth(),
+        -1.0f - static_cast<float>(pos.y) / map.getHeight()
+      );
+    }
+    else {
+      float ratio = (time - lastOperationTime) / kOperationInterval;
+      displayPos = glm::vec2(
+        -1.0f + static_cast<float>(lastOperationPos.x) / map.getWidth() * (1.f - ratio) +
+        (static_cast<float>(pos.x) - lastOperationPos.x) / map.getWidth() * ratio,
+        -1.0f + static_cast<float>(lastOperationPos.y) / map.getHeight() * (1.f - ratio) +
+        (static_cast<float>(pos.y) - lastOperationPos.y) / map.getHeight() * ratio
+      );
     }
   }
   GameEnd ending{GameEnd::Running};
-  Point pos;
+  Point pos, lastOperationPos{};
   TileState color{TileState::Black};
-  float time;
+  glm::vec2 displayPos{};
+  float time, lastOperationTime{};
 };
 
 struct InputAdapter {
@@ -321,14 +279,13 @@ struct InputAdapter {
 class KeyboardAdapter final : public InputAdapter {
   public:
     KeyboardAdapter() {
-      tg.run([this]() {inputAction();});
+      tg.run([this]() { inputAction(); });
     }
     void inputAction() override {
       char c = static_cast<char>(getchar());
       while (running) {
-        if (c == 'a' || c == 'A') {
+        if (c == 'a' || c == 'A')
           buffer.push(Action::Left);
-        }
         if (c == 'w' || c == 'W')
           buffer.push(Action::Up);
         if (c == 's' || c == 'S')
@@ -344,58 +301,204 @@ class KeyboardAdapter final : public InputAdapter {
       running = false;
       tg.wait();
     }
+
   private:
     std::atomic_bool running{true};
     tbb::task_group tg;
 };
 
-struct Displayer : NonCopyable {
-  virtual void display(const Map&map, const GameState&state) = 0;
-  virtual ~Displayer() = default;
+bool initGLFW(GLFWwindow*&window) {
+  if (!glfwInit()) {
+    std::cerr << "Failed to initialize GLFW" << std::endl;
+    return false;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  window = glfwCreateWindow(640, 720, "FLUID-GL", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "Failed to create GLFW window" << std::endl;
+    glfwTerminate();
+    return false;
+  }
+  glfwMakeContextCurrent(window);
+  glfwSwapInterval(1);
+  return true;
+}
+
+struct DrawBoard {
+  std::vector<glm::vec3> positions;
+  std::vector<glm::vec3> colors;
+  std::vector<uint> idx;
+  void addSquare(float x, float y, float width, float height, const glm::vec3&color) {
+    int num_vertices = positions.size();
+    positions.emplace_back(x, y, 0.0);
+    positions.emplace_back(x + width, y, 0.0);
+    positions.emplace_back(x + width, y + height, 0.0);
+    positions.emplace_back(x, y + height, 0.0);
+    for (int i = 0; i < 4; ++i)
+      colors.push_back(color);
+    idx.push_back(num_vertices);
+    idx.push_back(num_vertices + 1);
+    idx.push_back(num_vertices + 2);
+    idx.push_back(num_vertices);
+    idx.push_back(num_vertices + 2);
+    idx.push_back(num_vertices + 3);
+  }
 };
 
-class AsciiArtDisplayer final : public Displayer {
+class PythonSerialAdapter final : public InputAdapter {
   public:
-    AsciiArtDisplayer() = default;
-    void display(const Map&map, const GameState&state) override {
-      clearScreen();
-      std::cout << std::format("current position: ({}, {})\n{}", state.pos.x, state.pos.y, formString(map, state)) << std::endl;
+    explicit PythonSerialAdapter(const std::string&pythonScript) : pipe(
+      popen(std::format("python {}", pythonScript).c_str(), "r"),
+      pclose) {
+      if (pipe == nullptr)
+        ERROR("failed to open python script");
+      thread = std::make_unique<std::thread>([this]() { inputAction(); });
     }
-  private:
-    static std::string formString(const Map&map, const GameState&state) {
-      std::vector<char> buffer(map.getWidth() * (map.getHeight() + 1));
-      for (int x = 0; x < map.getWidth(); ++x) {
-        for (int y = 0; y < map.getHeight(); ++y) {
-          if (map.tile(x, y) == TileState::Empty)
-            buffer[x * (map.getHeight() + 1) + y] = ' ';
-          else if (map.tile(x, y) == TileState::Gray)
-            buffer[x * (map.getHeight() + 1) + y] = 'G';
-          else if (map.tile(x, y) == TileState::Black)
-            buffer[x * (map.getHeight() + 1) + y] = 'B';
-          else if (map.tile(x, y) == TileState::White)
-            buffer[x * (map.getHeight() + 1) + y] = 'W';
-          else ERROR("unknown tile state");
-          if (x == state.pos.x && y == state.pos.y)
-            buffer[x * (map.getHeight() + 1) + y] = '#';
+    void inputAction() override {
+      int v = filterInput();
+      while (true) {
+        switch (v) {
+          case 0:
+            buffer.push(Action::Left);
+            break;
+          case 1:
+            buffer.push(Action::Up);
+            break;
+          case 2:
+            buffer.push(Action::Down);
+            break;
+          case 3:
+            buffer.push(Action::Right);
+            break;
+          case 4:
+            buffer.push(Action::Switch);
+            break;
+          default:
+            ERROR("unknown input");
         }
-        buffer[x * (map.getHeight() + 1) + map.getHeight()] = '\n';
       }
-      for (auto end : map.getExits())
-        buffer[end.x * (map.getHeight() + 1) + end.y] = 'E';
-      return {buffer.begin(), buffer.end()};
     }
+    ~PythonSerialAdapter() noexcept override {
+      running = false;
+      if (thread->joinable())
+        thread->join();
+    }
+
+  private:
+    int filterInput() const {
+      static int prev = 998;
+      int v = 998;
+      fscanf(pipe.get(), "%d", &v);
+      while (v == prev || v == 998) {
+        prev = v;
+        fscanf(pipe.get(), "%d", &v);
+      }
+      return v;
+    }
+    std::atomic_bool running{true};
+    std::unique_ptr<std::thread> thread;
+    std::unique_ptr<FILE, decltype(&pclose)> pipe;
+};
+
+class OglDisplayer {
+  public:
+    explicit OglDisplayer(const Map&map) : width(map.getWidth()), height(map.getHeight()),
+                                           shader(std::make_unique<ShaderProg>(
+                                             std::format("{}/2d-default.vs", SHADER_DIR).c_str(),
+                                             std::format("{}/2d-default.fs", SHADER_DIR).c_str())) {
+      initGLFW(window);
+      for (int i = 0; i < width; ++i) {
+        for (int j = 0; j < height; ++j) {
+          glm::vec3 squareColor;
+          glm::vec3 squarePosition;
+          squarePosition.x = -1.0f + static_cast<float>(i) / width; // Set x position based on column index
+          squarePosition.y = -1.0f + static_cast<float>(j) / height; // Set y position based on row index
+          squarePosition.z = 0.0f; // Set z position as 0
+          if (map.tile(i, j) == TileState::Empty) continue;
+          if (map.isExit(i, j))
+            squareColor = glm::vec3(0.0f, 1.0f, 0.0f);
+          else if (map.tile(i, j) == TileState::Black)
+            squareColor = glm::vec3(0.0f, 0.0f, 0.0f);
+          else if (map.tile(i, j) == TileState::Gray)
+            squareColor = glm::vec3(0.5f, 0.5f, 0.5f);
+          else if (map.tile(i, j) == TileState::White)
+            squareColor = glm::vec3(1.0f, 1.0f, 1.0f);
+          board.addSquare(squarePosition.x, squarePosition.y, 2.0f / width, 2.0f / height, squareColor);
+        }
+      }
+      blockCoordPos = board.positions.size();
+      board.addSquare(0, 0, 2.0f / width, 2.0f / height, glm::vec3(0.0f, 0.0f, 1.0f));
+      shader->initAttributeHandles();
+      shader->initUniformHandles();
+      bgCtx.vao.bind();
+      bgCtx.newAttribute("aPos", board.positions, 3, 3 * sizeof(float), GL_FLOAT);
+      bgCtx.newAttribute("aColor", board.colors, 3, 3 * sizeof(float), GL_FLOAT);
+      bgCtx.ebo.bind();
+      bgCtx.ebo.passData(board.idx);
+      shader->use();
+    }
+    bool shouldClose(const GameState&state) const {
+      return glfwWindowShouldClose(window) || state.ending != GameEnd::Running;
+    }
+    void updateBlockPos(const GameState&state) {
+      auto vbo& = bgCtx.vbo[bgCtx.attribute("aPos")];
+      vbo.bind();
+      board.positions[blockCoordPos] = glm::vec3(state.displayPos[0], state.displayPos[1], 1.0f);
+      board.positions[blockCoordPos + 1] = glm::vec3(state.displayPos[0] + 2.0f / width, state.displayPos[1], 1.0f);
+      board.positions[blockCoordPos + 2] = glm::vec3(state.displayPos[0] + 2.0f / width,
+                                                     state.displayPos[1] + 2.0f / height,
+                                                     1.0f);
+      board.positions[blockCoordPos + 3] = glm::vec3(state.displayPos[0], state.displayPos[1] + 2.0f / height, 1.0f);
+      vbo.updateData(board.positions.data(), blockCoordPos, 4);
+      auto color_vbo& = bgCtx.vbo[bgCtx.attribute("aColor")];
+      color_vbo.bind();
+      glm::vec3 blockColor = glm::vec3(0.0f, 0.0f, 1.0f);
+      if (state.color == TileState::Black)
+        blockColor = glm::vec3(1.0f, 0.0f, 0.0f);
+      board.colors[blockCoordPos] = blockColor;
+      board.colors[blockCoordPos + 1] = blockColor;
+      board.colors[blockCoordPos + 2] = blockColor;
+      board.colors[blockCoordPos + 3] = blockColor;
+      color_vbo.updateData(board.colors.data(), blockCoordPos, 4);
+    }
+    void display(const Map&map, const GameState&state) const {
+      glfwPollEvents();
+      int wnd_width, wnd_height;
+      glfwGetFramebufferSize(window, &wnd_width, &wnd_height);
+      glViewport(0, 0, wnd_width, wnd_height);
+      glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+      glEnable(GL_DEPTH_TEST);
+      OpenGLContext::draw(GL_TRIANGLES, board.idx.size());
+      glfwSwapBuffers(window);
+    }
+    ~OglDisplayer() {
+      glfwDestroyWindow(window);
+      glfwTerminate();
+    }
+
+  private:
+    GLFWwindow* window{};
+    DrawBoard board;
+    int width, height;
+    int blockCoordPos{};
+    std::unique_ptr<ShaderProg> shader{};
+    OpenGLContext bgCtx;
 };
 
 int main(int argc, char** argv) {
-  auto map = std::make_unique<Map>(1, 30, 50);
-  std::unique_ptr<Displayer> displayer = std::make_unique<AsciiArtDisplayer>();
-  std::unique_ptr<InputAdapter> input = std::make_unique<KeyboardAdapter>();
+  auto map = std::make_unique<Map>(2, 30, 50);
+  std::unique_ptr<OglDisplayer> displayer = std::make_unique<OglDisplayer>(*map);
+  std::unique_ptr<PythonSerialAdapter> input = std::make_unique<PythonSerialAdapter>(
+    std::format("{}/serial-sim.py", PYTHON_DIR));
   GameState state(map->getStart());
-  while (state.ending == GameEnd::Running) {
+  while (!displayer->shouldClose(state)) {
+    glfwPollEvents();
     if (Action action; input->buffer.try_pop(action))
       state.update(*map);
     displayer->display(*map, state);
-    sleep(1);
   }
   std::cout << "Game ended!" << std::endl;
 }
