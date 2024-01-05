@@ -495,10 +495,14 @@ class OglDisplayer {
 };
 
 int main(int argc, char** argv) {
+  if (argc != 2) {
+    std::cout << "Usage: game [python script path]" << std::endl;
+    return 0;
+  }
+  std::string pythonScipt = argv[1];
   auto map = std::make_unique<Map>(2, 30, 50);
   std::unique_ptr<OglDisplayer> displayer = std::make_unique<OglDisplayer>(*map);
-  std::unique_ptr<PythonSerialAdapter> input = std::make_unique<PythonSerialAdapter>(
-    std::format("{}/serial-sim.py", PYTHON_DIR));
+  std::unique_ptr<PythonSerialAdapter> input = std::make_unique<PythonSerialAdapter>(pythonScipt);
   GameState state(map->getStart());
   state.update(*map);
   displayer->updateBlockPos(state);
