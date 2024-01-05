@@ -218,6 +218,8 @@ struct GameState {
   explicit GameState(Point p) : pos(p), time(glfwGetTime()) {
   }
   void move(Action action) {
+    lastOperationPos = pos;
+    lastOperationTime = glfwGetTime();
     if (action == Action::Up)
       pos.x--;
     else if (action == Action::Down)
