@@ -215,7 +215,7 @@ enum class GameEnd {
 };
 
 struct GameState {
-  explicit GameState(Point p) : pos(p), time(glfwGetTime()) {
+  explicit GameState(Point p) : pos(p), time(glfwGetTime()), startTime(time) {
   }
   void move(Action action) {
     lastOperationPos = pos;
@@ -232,6 +232,7 @@ struct GameState {
       ERROR("unknown action");
   }
   void update(const Map&map) {
+    time = glfwGetTime();
     if (pos.x < 0 || pos.x >= map.getWidth() || pos.y < 0 || pos.y >= map.getHeight())
       ending = GameEnd::Failed;
     if (color != TileState::Black && color != TileState::White)
@@ -248,7 +249,10 @@ struct GameState {
         return;
       }
     }
-    time = glfwGetTime();
+    if (time > startTime + kMaxGameTime) {
+      ending = GameEnd::Finished;
+      return ;
+    }
     if (time > lastOperationTime + kOperationInterval) {
       displayPos = glm::vec2(
         -1.0f + static_cast<float>(pos.x) / map.getWidth(),
@@ -269,7 +273,7 @@ struct GameState {
   Point pos, lastOperationPos{};
   TileState color{TileState::Black};
   glm::vec2 displayPos{};
-  float time, lastOperationTime{};
+  float time{}, lastOperationTime{}, startTime{};
 };
 
 struct InputAdapter {
