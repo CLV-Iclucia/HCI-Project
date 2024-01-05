@@ -118,10 +118,10 @@ class Map : NonCopyable {
             pos.y + coordChanges[static_cast<int>(action)].y
           };
         }
+        tile(pos.x, pos.y) = curColor;
         curPathStart += len;
         exits.push_back(pos);
         assert(tile(pos.x, pos.y) != TileState::Empty);
-        std::cout << pos.x << " " << pos.y << std::endl;
       }
     }
 
@@ -218,7 +218,7 @@ enum class GameEnd {
 struct GameState {
   explicit GameState(Point p) : pos(p), time(glfwGetTime()), startTime(time) {
   }
-  void move(Action action) {
+  void move(const Map&map, Action action) {
     lastOperationPos = pos;
     lastOperationTime = glfwGetTime();
     if (action == Action::Up)
@@ -229,6 +229,12 @@ struct GameState {
       pos.y--;
     else if (action == Action::Right)
       pos.y++;
+    else if (action == Action::Switch) {
+      if (color == TileState::Black)
+        color = TileState::White;
+      else
+        color = TileState::Black;
+    }
     else
       ERROR("unknown action");
   }
@@ -256,18 +262,15 @@ struct GameState {
     }
     if (time > lastOperationTime + kOperationInterval) {
       displayPos = glm::vec2(
-        -1.0f + static_cast<float>(pos.x) / map.getWidth(),
-        -1.0f - static_cast<float>(pos.y) / map.getHeight()
+        -1.f + static_cast<float>(pos.x) * 2.0 / map.getWidth(),
+        -1.f + static_cast<float>(pos.y) * 2.0 / map.getHeight()
       );
     }
     else {
       float ratio = (time - lastOperationTime) / kOperationInterval;
-      displayPos = glm::vec2(
-        -1.0f + static_cast<float>(lastOperationPos.x) / map.getWidth() * (1.f - ratio) +
-        (static_cast<float>(pos.x) - lastOperationPos.x) / map.getWidth() * ratio,
-        -1.0f + static_cast<float>(lastOperationPos.y) / map.getHeight() * (1.f - ratio) +
-        (static_cast<float>(pos.y) - lastOperationPos.y) / map.getHeight() * ratio
-      );
+      float lerp_x = (1.f - ratio) * static_cast<float>(lastOperationPos.x) + pos.x * ratio;
+      float lerp_y = (1.f - ratio) * static_cast<float>(lastOperationPos.y) + pos.y * ratio;
+      displayPos = glm::vec2(-1.f + lerp_x * 2.f / map.getWidth(), -1.f + lerp_y * 2.f / map.getHeight());
     }
   }
   GameEnd ending{GameEnd::Running};
@@ -281,37 +284,6 @@ struct InputAdapter {
   virtual void inputAction() = 0;
   virtual ~InputAdapter() = default;
   tbb::concurrent_queue<Action> buffer;
-};
-
-class KeyboardAdapter final : public InputAdapter {
-  public:
-    KeyboardAdapter() {
-      tg.run([this]() { inputAction(); });
-    }
-    void inputAction() override {
-      char c = static_cast<char>(getchar());
-      while (running) {
-        if (c == 'a' || c == 'A')
-          buffer.push(Action::Left);
-        if (c == 'w' || c == 'W')
-          buffer.push(Action::Up);
-        if (c == 's' || c == 'S')
-          buffer.push(Action::Down);
-        if (c == 'd' || c == 'D')
-          buffer.push(Action::Right);
-        if (c == 'x' || c == 'X')
-          buffer.push(Action::Switch);
-        c = static_cast<char>(getchar());
-      }
-    }
-    ~KeyboardAdapter() noexcept override {
-      running = false;
-      tg.wait();
-    }
-
-  private:
-    std::atomic_bool running{true};
-    tbb::task_group tg;
 };
 
 bool initGLFW(GLFWwindow*&window) {
@@ -364,6 +336,9 @@ class PythonSerialAdapter final : public InputAdapter {
       thread = std::make_unique<std::thread>([this]() { inputAction(); });
     }
     void inputAction() override {
+      char c;
+      // while(c != '#')
+      //   fscanf(pipe.get(), "%c", &c);
       int v = filterInput();
       if (v == -1)
         ERROR("unexpected end of pipe");
@@ -387,6 +362,7 @@ class PythonSerialAdapter final : public InputAdapter {
           default:
             ERROR("unknown input");
         }
+        v = filterInput();
       }
     }
     ~PythonSerialAdapter() noexcept override {
@@ -399,8 +375,10 @@ class PythonSerialAdapter final : public InputAdapter {
     int filterInput() const {
       static int prev = 998;
       int v = 998;
-      if (fscanf(pipe.get(), "%d", &v) == EOF)
+      if (fscanf(pipe.get(), "%d", &v) == EOF) {
+        std::cerr << "Warning: reaching end of file" << std::endl;
         return -1;
+      }
       printf("%d\n", v);
       while (v == prev || v == 998) {
         prev = v;
@@ -429,8 +407,8 @@ class OglDisplayer {
         for (int j = 0; j < height; ++j) {
           glm::vec3 squareColor;
           glm::vec3 squarePosition;
-          squarePosition.x = -1.0f + static_cast<float>(i) / width; // Set x position based on column index
-          squarePosition.y = -1.0f + static_cast<float>(j) / height; // Set y position based on row index
+          squarePosition.x = -1.0f + static_cast<float>(i) / width * 2.0f; // Set x position based on column index
+          squarePosition.y = -1.0f + static_cast<float>(j) / height * 2.0f; // Set y position based on row index
           squarePosition.z = 0.0f;
           if (map.tile(i, j) == TileState::Empty) continue;
           if (map.isExit(i, j)) {
@@ -443,13 +421,17 @@ class OglDisplayer {
             squareColor = glm::vec3(0.5f, 0.5f, 0.5f);
           else if (map.tile(i, j) == TileState::White)
             squareColor = glm::vec3(1.0f, 1.0f, 1.0f);
-          std::cout << i << " " << j << " " << squareColor.x << " " << squareColor.y << " " << squareColor.z << std::endl;
-          board.addSquare(squarePosition.x, squarePosition.y, squarePosition.z, 2.0f / width, 2.0f / height, squareColor);
+          board.addSquare(squarePosition.x,
+                          squarePosition.y,
+                          squarePosition.z,
+                          2.0f / width,
+                          2.0f / height,
+                          squareColor);
         }
       }
       bgCtx = std::make_unique<OpenGLContext>();
-      blockCoordPos = board.positions.size();
-      board.addSquare(0, 0, 2.0f / width, 2.0f / height, -0.5f, glm::vec3(0.0f, 0.0f, 1.0f));
+      blockInfoOffset = board.positions.size();
+      board.addSquare(0, 0, 2.0f / width, 2.0f / height, -0.5f, glm::vec3(1.0f, 0.0f, 0.0f));
       shader->initAttributeHandles();
       shader->initUniformHandles();
       bgCtx->vao.bind();
@@ -462,26 +444,26 @@ class OglDisplayer {
     bool shouldClose(const GameState&state) const {
       return glfwWindowShouldClose(window) || state.ending != GameEnd::Running;
     }
-    void updateBlockPos(const GameState&state) {
-      auto& vbo = bgCtx->vbo[bgCtx->attribute("aPos")];
+    void updateBlockData(const GameState&state) {
+      auto&vbo = bgCtx->vbo[bgCtx->attribute("aPos")];
       vbo.bind();
-      board.positions[blockCoordPos] = glm::vec3(state.displayPos[0], state.displayPos[1], -0.5f);
-      board.positions[blockCoordPos + 1] = glm::vec3(state.displayPos[0] + 2.0f / width, state.displayPos[1], -0.5f);
-      board.positions[blockCoordPos + 2] = glm::vec3(state.displayPos[0] + 2.0f / width,
-                                                     state.displayPos[1] + 2.0f / height,
-                                                     -0.5f);
-      board.positions[blockCoordPos + 3] = glm::vec3(state.displayPos[0], state.displayPos[1] + 2.0f / height, -0.5f);
-      vbo.updateData(board.positions.data(), blockCoordPos, 4);
-      auto& color_vbo = bgCtx->vbo[bgCtx->attribute("aColor")];
+      board.positions[blockInfoOffset] = glm::vec3(state.displayPos[0], state.displayPos[1], -0.5f);
+      board.positions[blockInfoOffset + 1] = glm::vec3(state.displayPos[0] + 2.0f / width, state.displayPos[1], -0.5f);
+      board.positions[blockInfoOffset + 2] = glm::vec3(state.displayPos[0] + 2.0f / width,
+                                                       state.displayPos[1] + 2.0f / height,
+                                                       -0.5f);
+      board.positions[blockInfoOffset + 3] = glm::vec3(state.displayPos[0], state.displayPos[1] + 2.0f / height, -0.5f);
+      vbo.updateData(board.positions.data() + blockInfoOffset, blockInfoOffset, 4);
+      auto&color_vbo = bgCtx->vbo[bgCtx->attribute("aColor")];
       color_vbo.bind();
       glm::vec3 blockColor = glm::vec3(0.0f, 0.0f, 1.0f);
       if (state.color == TileState::Black)
         blockColor = glm::vec3(1.0f, 0.0f, 0.0f);
-      board.colors[blockCoordPos] = blockColor;
-      board.colors[blockCoordPos + 1] = blockColor;
-      board.colors[blockCoordPos + 2] = blockColor;
-      board.colors[blockCoordPos + 3] = blockColor;
-      color_vbo.updateData(board.colors.data(), blockCoordPos, 4);
+      board.colors[blockInfoOffset] = blockColor;
+      board.colors[blockInfoOffset + 1] = blockColor;
+      board.colors[blockInfoOffset + 2] = blockColor;
+      board.colors[blockInfoOffset + 3] = blockColor;
+      color_vbo.updateData(board.colors.data() + blockInfoOffset, blockInfoOffset, 4);
     }
     void display(const Map&map, const GameState&state) const {
       glfwPollEvents();
@@ -503,7 +485,7 @@ class OglDisplayer {
     GLFWwindow* window{};
     DrawBoard board;
     int width, height;
-    int blockCoordPos{};
+    int blockInfoOffset{};
     std::unique_ptr<ShaderProg> shader{};
     std::unique_ptr<OpenGLContext> bgCtx;
 };
@@ -514,18 +496,18 @@ int main(int argc, char** argv) {
     return 0;
   }
   std::string pythonScipt = argv[1];
-  auto map = std::make_unique<Map>(1, 5, 8);
+  auto map = std::make_unique<Map>(1, 30, 50);
   std::unique_ptr<OglDisplayer> displayer = std::make_unique<OglDisplayer>(*map);
   std::unique_ptr<PythonSerialAdapter> input = std::make_unique<PythonSerialAdapter>(pythonScipt);
   GameState state(map->getStart());
   state.update(*map);
-  displayer->updateBlockPos(state);
+  displayer->updateBlockData(state);
   while (!displayer->shouldClose(state)) {
     glfwPollEvents();
     if (Action action; input->buffer.try_pop(action))
-      state.move(action);
+      state.move(*map, action);
     state.update(*map);
-    displayer->updateBlockPos(state);
+    displayer->updateBlockData(state);
     displayer->display(*map, state);
   }
   std::cout << "Game ended!" << std::endl;
