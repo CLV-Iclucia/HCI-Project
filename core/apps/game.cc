@@ -496,11 +496,14 @@ int main(int argc, char** argv) {
   std::unique_ptr<PythonSerialAdapter> input = std::make_unique<PythonSerialAdapter>(
     std::format("{}/serial-sim.py", PYTHON_DIR));
   GameState state(map->getStart());
+  state.update(*map);
+  displayer->updateBlockPos(state);
   while (!displayer->shouldClose(state)) {
     glfwPollEvents();
     if (Action action; input->buffer.try_pop(action))
       state.move(action);
     state.update(*map);
+    displayer->updateBlockPos(state);
     displayer->display(*map, state);
   }
   std::cout << "Game ended!" << std::endl;
