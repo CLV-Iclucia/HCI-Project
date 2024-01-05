@@ -497,7 +497,8 @@ int main(int argc, char** argv) {
   while (!displayer->shouldClose(state)) {
     glfwPollEvents();
     if (Action action; input->buffer.try_pop(action))
-      state.update(*map);
+      state.move(action);
+    state.update(*map);
     displayer->display(*map, state);
   }
   std::cout << "Game ended!" << std::endl;
