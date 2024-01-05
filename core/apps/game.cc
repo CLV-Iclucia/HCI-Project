@@ -337,8 +337,12 @@ class PythonSerialAdapter final : public InputAdapter {
     }
     void inputAction() override {
       char c;
-      // while(c != '#')
-      //   fscanf(pipe.get(), "%c", &c);
+      fscanf(pipe.get(), "%c", &c);
+      while(c != '#') {
+        if (fscanf(pipe.get(), "%c", &c) == EOF)
+          ERROR("unexpected end of pipe");
+        printf("%c\n", c);
+      }
       int v = filterInput();
       if (v == -1)
         ERROR("unexpected end of pipe");
