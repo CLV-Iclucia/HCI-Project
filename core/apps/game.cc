@@ -449,7 +449,7 @@ class OglDisplayer {
       return glfwWindowShouldClose(window) || state.ending != GameEnd::Running;
     }
     void updateBlockPos(const GameState&state) {
-      auto vbo& = bgCtx.vbo[bgCtx.attribute("aPos")];
+      auto& vbo = bgCtx.vbo[bgCtx.attribute("aPos")];
       vbo.bind();
       board.positions[blockCoordPos] = glm::vec3(state.displayPos[0], state.displayPos[1], 1.0f);
       board.positions[blockCoordPos + 1] = glm::vec3(state.displayPos[0] + 2.0f / width, state.displayPos[1], 1.0f);
@@ -458,7 +458,7 @@ class OglDisplayer {
                                                      1.0f);
       board.positions[blockCoordPos + 3] = glm::vec3(state.displayPos[0], state.displayPos[1] + 2.0f / height, 1.0f);
       vbo.updateData(board.positions.data(), blockCoordPos, 4);
-      auto color_vbo& = bgCtx.vbo[bgCtx.attribute("aColor")];
+      auto& color_vbo = bgCtx.vbo[bgCtx.attribute("aColor")];
       color_vbo.bind();
       glm::vec3 blockColor = glm::vec3(0.0f, 0.0f, 1.0f);
       if (state.color == TileState::Black)
