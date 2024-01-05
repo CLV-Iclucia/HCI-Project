@@ -358,7 +358,7 @@ class PythonSerialAdapter final : public InputAdapter {
     }
     void inputAction() override {
       int v = filterInput();
-      while (true) {
+      while (running) {
         switch (v) {
           case 0:
             buffer.push(Action::Left);
